@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mail Blast — Dry Run</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Bulk Email Dry-Run Sender</h1>
+
+      <div id="banner" class="banner hidden" role="status">
+        A mail blast is currently processing. The form is unavailable until it completes.
+      </div>
+
+      <section class="card">
+        <h2>New Campaign</h2>
+        <form id="campaign-form">
+          <label for="subject">Subject</label>
+          <input id="subject" name="subject" type="text" autocomplete="off" />
+
+          <label for="body">Body (plain text — use <code>{{name}}</code> to personalize)</label>
+          <textarea id="body" name="body" rows="8"></textarea>
+
+          <button id="send" type="submit">Send</button>
+          <p id="form-error" class="error hidden"></p>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="row">
+          <h2>Progress</h2>
+          <button id="refresh" type="button">Refresh</button>
+        </div>
+        <div id="progress" class="progress">
+          <p class="muted">No active campaign.</p>
+        </div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

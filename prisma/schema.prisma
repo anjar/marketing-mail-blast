@@ -1,0 +1,175 @@
+// Bulk Email Dry-Run Sender — PostgreSQL is the sole business system of record.
+// All aggregates are reproducible from CampaignRecipient rows (Constitution V).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum CampaignStatus {
+  PREPARING
+  RUNNING
+  COMPLETED
+  COMPLETED_WITH_ISSUES
+  FAILED // optional unrecoverable-orchestration status; never replaces recipient outcomes
+}
+
+enum RecipientStatus {
+  PENDING
+  IN_PROGRESS
+  REJECTED
+  SENT
+  FAILED
+  DELIVERY_UNKNOWN
+}
+
+enum EnqueueState {
+  NOT_READY
+  READY_TO_QUEUE
+  QUEUED
+  PROCESSING
+  TERMINAL
+}
+
+enum RejectionReason {
+  EMAIL_MISSING
+  EMAIL_INVALID_FORMAT
+  DUPLICATE_EMAIL
+}
+
+enum DeliveryFailureReason {
+  SMTP_REJECTED
+  SMTP_TIMEOUT
+  CONNECTION_ERROR
+  RETRIES_EXHAUSTED
+  OTHER
+}
+
+enum AttemptStatus {
+  STARTED
+  SUCCEEDED
+  FAILED
+  UNKNOWN
+}
+
+// ---------------------------------------------------------------------------
+// Recipient — reusable source dataset, independent of campaigns.
+// Not modified through the application in this phase.
+// ---------------------------------------------------------------------------
+
+model Recipient {
+  id        BigInt   @id @default(autoincrement())
+  email     String?
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaignRecipients CampaignRecipient[]
+
+  @@index([id])
+}
+
+// ---------------------------------------------------------------------------
+// Campaign — one submitted blast. At most one active (PREPARING|RUNNING).
+// The single-active partial unique index is added in the migration (Prisma
+// cannot express a partial unique index on a constant expression).
+// ---------------------------------------------------------------------------
+
+model Campaign {
+  id                     String         @id @default(uuid())
+  subject                String
+  body                   String
+  status                 CampaignStatus @default(PREPARING)
+  snapshotMaxRecipientId BigInt         @default(0)
+  preparationCursor      BigInt         @default(0)
+
+  totalCount               Int @default(0)
+  pendingCount             Int @default(0)
+  rejectedCount            Int @default(0)
+  sentCount                Int @default(0)
+  failedCount              Int @default(0)
+  deliveryUnknownCount     Int @default(0)
+  totalDeliveryAttemptCount Int @default(0)
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  recipients CampaignRecipient[]
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// CampaignRecipient — durable per-campaign snapshot + processing record.
+// One row per source recipient in the snapshot.
+// ---------------------------------------------------------------------------
+
+model CampaignRecipient {
+  id                Int      @id @default(autoincrement())
+  campaignId        String
+  sourceRecipientId BigInt
+
+  snapshotEmail   String?
+  normalizedEmail String?
+  snapshotName    String?
+  personalizedName String  @default("Customer")
+
+  status                RecipientStatus        @default(PENDING)
+  rejectionReason       RejectionReason?
+  deliveryFailureReason DeliveryFailureReason?
+  duplicateOfId         Int?
+
+  deliveryAttemptCount Int          @default(0)
+  enqueueState         EnqueueState @default(NOT_READY)
+
+  leaseOwner      String?
+  leaseExpiresAt  DateTime?
+  attemptStartedAt DateTime?
+  terminalAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  campaign        Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  sourceRecipient Recipient           @relation(fields: [sourceRecipientId], references: [id])
+  duplicateOf     CampaignRecipient?  @relation("DuplicateOf", fields: [duplicateOfId], references: [id])
+  duplicates      CampaignRecipient[] @relation("DuplicateOf")
+  attempts        DeliveryAttempt[]
+
+  @@unique([campaignId, sourceRecipientId])
+  @@index([campaignId, enqueueState, id])
+  @@index([campaignId, status])
+  @@index([status, leaseExpiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// DeliveryAttempt — audit history of every actual SMTP attempt.
+// Current outcome remains on CampaignRecipient.
+// ---------------------------------------------------------------------------
+
+model DeliveryAttempt {
+  id                  Int           @id @default(autoincrement())
+  campaignRecipientId Int
+  attemptNumber       Int
+  jobId               String
+  status              AttemptStatus @default(STARTED)
+  smtpResponse        String?
+  acceptanceDefinitive Boolean      @default(false)
+  startedAt           DateTime      @default(now())
+  finishedAt          DateTime?
+  createdAt           DateTime      @default(now())
+
+  campaignRecipient CampaignRecipient @relation(fields: [campaignRecipientId], references: [id], onDelete: Cascade)
+
+  @@index([campaignRecipientId])
+}

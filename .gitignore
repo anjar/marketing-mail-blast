@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Prisma generated client
+prisma/generated/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Test / coverage
+coverage/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
+
+# Generated dummy data dumps (never commit generated recipient data)
+dummy/*.csv
+dummy/*.dump

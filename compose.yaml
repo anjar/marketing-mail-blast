@@ -1,0 +1,96 @@
+# Compose Specification (no top-level `version:` key — Docker & Podman compatible).
+# Validated with: docker compose config/up AND podman compose config/up.
+# Avoids Docker-engine-only features; uses named volumes + healthchecks only.
+#
+# Provider note (Podman): `podman compose` delegates to docker-compose or
+# podman-compose depending on host. `depends_on: condition: service_healthy` is
+# supported by docker compose and podman-compose >= 1.0.6. The app ALSO retries
+# initial DB/Redis connections with bounded backoff, so healthcheck-gated startup
+# is an optimization, not a correctness dependency (see .env DB_/REDIS_ backoff).
+
+name: mailblast
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mailblast
+      POSTGRES_PASSWORD: mailblast
+      POSTGRES_DB: mailblast
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailblast -d mailblast"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      # Explicit Mailpit config — recorded by benchmark reports.
+      MP_SMTP_BIND_ADDR: "0.0.0.0:1025"
+      MP_UI_BIND_ADDR: "0.0.0.0:8025"
+      # Persistent store + retention cap. Correctness stays based on PostgreSQL
+      # even when Mailpit prunes older messages.
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: "100000"
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    volumes:
+      - mailpit-data:/data
+    healthcheck:
+      # Mailpit ships wget in its scratch image; hit the readiness endpoint.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8025/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://mailblast:mailblast@postgres:5432/mailblast?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres-data:
+  redis-data:
+  mailpit-data:

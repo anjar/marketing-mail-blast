@@ -7,7 +7,7 @@ carry identifiers only — never message bodies, recipient snapshots, or batches
 
 - **Purpose**: keyset-scan the campaign snapshot, materialize `CampaignRecipient` rows, validate,
   dedupe, mark accepted `READY_TO_QUEUE`. Resumable from `Campaign.preparationCursor`.
-- **Job id**: `prepare:{campaignId}` (deterministic; one prep job per campaign).
+- **Job id**: `prepare_{campaignId}` (deterministic; one prep job per campaign).
 - **Payload**:
   ```json
   { "campaignId": "uuid" }
@@ -20,7 +20,7 @@ carry identifiers only — never message bodies, recipient snapshots, or batches
 
 - **Purpose**: process exactly one `CampaignRecipient`: claim lease, `PENDING -> IN_PROGRESS`,
   create `DeliveryAttempt`, SMTP send, classify outcome.
-- **Job id**: `deliver:{campaignId}:{campaignRecipientId}` (deterministic — dedupes re-enqueue).
+- **Job id**: `deliver_{campaignId}_{campaignRecipientId}` (deterministic — dedupes re-enqueue).
 - **Payload**:
   ```json
   { "campaignId": "uuid", "campaignRecipientId": 12345 }
@@ -38,7 +38,7 @@ carry identifiers only — never message bodies, recipient snapshots, or batches
 - **Purpose**: repeatable reconciliation — dispatch `READY_TO_QUEUE` (bounded `addBulk`,
   backpressure), sweep expired `IN_PROGRESS` leases -> `DELIVERY_UNKNOWN`, evaluate completion,
   verify counter reconciliation, restore missing prep/dispatch on startup.
-- **Job id**: `maintenance:{campaignId}` (repeatable) + `startup-reconcile` on boot.
+- **Job id**: `maintenance_{campaignId}` (repeatable) + `startup-reconcile` on boot.
 - **Payload**:
   ```json
   { "campaignId": "uuid" }
