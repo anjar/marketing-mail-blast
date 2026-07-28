@@ -40,7 +40,31 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Confirm the plan satisfies each principle in `.specify/memory/constitution.md`. Mark PASS/FAIL
+and note any exception (which must also appear in Complexity Tracking with justification).
+
+- [ ] I. Recipient Outcome Integrity — every recipient reaches one traceable disposition; no
+      `SENT` without SMTP-acceptance evidence; no `FAILED` when delivery may have been accepted.
+- [ ] II. Single Active Campaign — single-active invariant enforced atomically by the durable
+      system of record, not by UI/in-memory/queue/Redis locks alone.
+- [ ] III. Interruption-Safe and Idempotent Processing — bounded jobs with deterministic
+      identity; unique campaign-recipient records; safe restart with no loss or silent dup.
+- [ ] IV. Validate Before Queueing — validation persisted and countable before async work.
+- [ ] V. Durable State and Reconciliation — all aggregates reproducible from recipient-level
+      records; queue state is not the system of record.
+- [ ] VI. Bounded Work and Controlled Concurrency — batches/concurrency configurable, bounded,
+      backpressured; no whole-campaign in memory or single job/transaction/request.
+- [ ] VII. Measured Performance — no throughput/scale claim without recorded benchmark evidence.
+- [ ] VIII. Observable Failures — persisted state + structured logs with stable identifiers; no
+      recipient lost to queue-job removal/expiry/stall.
+- [ ] IX. Realistic and Failure-Oriented Testing — integration tests hit real DB/queue/Redis/SMTP
+      and cover the mandated interruption and reconciliation scenarios.
+- [ ] X. Minimum Sufficient Scope — every new abstraction/service/layer has a documented current
+      requirement; no speculative production extensibility.
+- [ ] XI. Traceable Decisions — each non-trivial decision documented (requirement, alternatives,
+      choice, tradeoffs, consequences, validation).
+- [ ] Non-Goals respected — no excluded capability (auth, multi-tenancy, scheduling, production
+      delivery, deliverability verification, analytics, etc.) introduced.
 
 ## Project Structure
 
