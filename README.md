@@ -42,7 +42,7 @@ DATABASE_URL=postgresql://mailblast:mailblast@localhost:5432/mailblast npx prism
 - Mailpit UI: http://localhost:8025
 - Health: `/health` (liveness), `/ready` (PostgreSQL + Redis)
 
-Seed recipients:
+Seed recipients (execute in host machine, not inside a container):
 
 ```bash
 cd dummy
