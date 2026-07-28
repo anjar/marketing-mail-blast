@@ -42,9 +42,18 @@ DATABASE_URL=postgresql://mailblast:mailblast@localhost:5432/mailblast npx prism
 - Mailpit UI: http://localhost:8025
 - Health: `/health` (liveness), `/ready` (PostgreSQL + Redis)
 
-Seed recipients and run a campaign — see
-[`specs/001-bulk-email-dryrun/quickstart.md`](specs/001-bulk-email-dryrun/quickstart.md) for the full
-end-to-end validation walkthrough, and [`dummy/README.md`](dummy/README.md) for data generators.
+Seed recipients:
+
+```bash
+cd dummy
+./run-seed.sh 00_clear.sql
+./run-seed.sh 10_seed_throughput.sql -v scale=1000   # or 10000 / 100000 / 1000000
+./run-seed.sh 30_verify_counts.sql
+```
+
+See [`specs/001-bulk-email-dryrun/quickstart.md`](specs/001-bulk-email-dryrun/quickstart.md) for the
+full end-to-end validation walkthrough, and [`dummy/README.md`](dummy/README.md) for all seed
+scripts (including validation-correctness fixtures).
 
 ## API
 

@@ -13,12 +13,8 @@ import { APP_CONFIG, AppConfig } from '../config/app-config';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { personalizeBody } from '../mail/personalization';
-import {
-  DeliveryJobData,
-  QUEUE_DELIVERY,
-  REDIS_CONNECTION,
-  deliveryJobId,
-} from '../queue/queue.constants';
+import { DeliveryJobData, QUEUE_DELIVERY, deliveryJobId } from '../queue/queue.constants';
+import { createWorkerConnection } from '../queue/redis.factory';
 import { classifyError } from './outcome-classifier';
 
 /**
@@ -34,11 +30,11 @@ import { classifyError } from './outcome-classifier';
 export class DeliveryProcessor implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(DeliveryProcessor.name);
   private readonly workers: Worker<DeliveryJobData>[] = [];
+  private readonly connections: Redis[] = [];
   private readonly workerId = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    @Inject(REDIS_CONNECTION) private readonly connection: Redis,
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
   ) {}
@@ -46,11 +42,13 @@ export class DeliveryProcessor implements OnModuleInit, OnApplicationShutdown {
   onModuleInit(): void {
     const { count, concurrency, rateLimitMax, rateLimitDurationMs } = this.config.workers;
     for (let i = 0; i < count; i++) {
+      const connection = createWorkerConnection(this.config);
+      this.connections.push(connection);
       const worker = new Worker<DeliveryJobData>(
         QUEUE_DELIVERY,
         async (job) => this.process(job),
         {
-          connection: this.connection,
+          connection,
           concurrency,
           limiter: { max: rateLimitMax, duration: rateLimitDurationMs },
         },
@@ -65,6 +63,7 @@ export class DeliveryProcessor implements OnModuleInit, OnApplicationShutdown {
 
   async onApplicationShutdown(): Promise<void> {
     await Promise.all(this.workers.map((w) => w.close()));
+    await Promise.all(this.connections.map((c) => c.quit().catch(() => undefined)));
   }
 
   /**

@@ -4,7 +4,6 @@ import {
   PrismaClient,
   RecipientStatus,
 } from '@prisma/client';
-import IORedis, { Redis } from 'ioredis';
 import {
   describeIntegration,
   flushRedis,
@@ -31,25 +30,20 @@ import { deliveryJobId } from '../../src/queue/queue.constants';
 describeIntegration('Recovery and idempotency', () => {
   const config = loadConfig();
   let prisma: PrismaClient;
-  let redis: Redis;
   let orphanSweep: OrphanSweepService;
   let completion: CompletionService;
   let delivery: DeliveryProcessor;
 
   beforeAll(() => {
     prisma = prismaClient();
-    redis = new IORedis({
-      host: config.redis.host,
-      port: config.redis.port,
-      maxRetriesPerRequest: null,
-    });
     const prismaSvc = prisma as unknown as PrismaService;
     const progress = new ProgressService(prismaSvc);
     const counters = new CampaignCountersService(prismaSvc, progress);
     const mail = new MailService(config);
     orphanSweep = new OrphanSweepService(prismaSvc);
     completion = new CompletionService(prismaSvc, progress, counters);
-    delivery = new DeliveryProcessor(config, redis, prismaSvc, mail);
+    // No worker started: constructing the processor does not call onModuleInit.
+    delivery = new DeliveryProcessor(config, prismaSvc, mail);
   });
 
   beforeEach(async () => {
@@ -59,7 +53,6 @@ describeIntegration('Recovery and idempotency', () => {
   });
 
   afterAll(async () => {
-    await redis.quit();
     await prisma.$disconnect();
   });
 

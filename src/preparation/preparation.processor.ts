@@ -3,6 +3,7 @@ import { CampaignStatus, EnqueueState, Prisma, RecipientStatus } from '@prisma/c
 import { Job, Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { APP_CONFIG, AppConfig } from '../config/app-config';
+import { createWorkerConnection } from '../queue/redis.factory';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecipientService, SourceRecipientRow } from '../recipient/recipient.service';
 import { CampaignCountersService } from '../campaign/campaign-counters.service';
@@ -15,7 +16,6 @@ import {
   MaintenanceJobData,
   PreparationJobData,
   QUEUE_PREPARATION,
-  REDIS_CONNECTION,
   maintenanceJobId,
 } from '../queue/queue.constants';
 
@@ -29,10 +29,10 @@ import {
 export class PreparationProcessor implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(PreparationProcessor.name);
   private worker?: Worker<PreparationJobData>;
+  private workerConnection?: Redis;
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    @Inject(REDIS_CONNECTION) private readonly connection: Redis,
     @Inject(MAINTENANCE_QUEUE) private readonly maintenanceQueue: Queue<MaintenanceJobData>,
     private readonly prisma: PrismaService,
     private readonly recipients: RecipientService,
@@ -40,10 +40,11 @@ export class PreparationProcessor implements OnModuleInit, OnApplicationShutdown
   ) {}
 
   onModuleInit(): void {
+    this.workerConnection = createWorkerConnection(this.config);
     this.worker = new Worker<PreparationJobData>(
       QUEUE_PREPARATION,
       async (job) => this.prepare(job),
-      { connection: this.connection, concurrency: 1 },
+      { connection: this.workerConnection, concurrency: 1 },
     );
     this.worker.on('failed', (job, err) =>
       this.logger.error(`Preparation job ${job?.id} failed: ${err.message}`),
@@ -52,6 +53,7 @@ export class PreparationProcessor implements OnModuleInit, OnApplicationShutdown
 
   async onApplicationShutdown(): Promise<void> {
     await this.worker?.close();
+    await this.workerConnection?.quit().catch(() => undefined);
   }
 
   /** Ensure a repeatable maintenance job drives dispatch/completion for a campaign. */

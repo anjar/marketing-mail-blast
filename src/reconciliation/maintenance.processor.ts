@@ -5,13 +5,14 @@ import { Redis } from 'ioredis';
 import { PrismaService } from '../prisma/prisma.service';
 import { DispatchService } from '../dispatch/dispatch.service';
 import { CompletionService } from '../campaign/completion.service';
+import { APP_CONFIG, AppConfig } from '../config/app-config';
 import {
   MAINTENANCE_QUEUE,
   MaintenanceJobData,
   QUEUE_MAINTENANCE,
-  REDIS_CONNECTION,
   maintenanceJobId,
 } from '../queue/queue.constants';
+import { createWorkerConnection } from '../queue/redis.factory';
 import { OrphanSweepService } from './orphan-sweep.service';
 
 /**
@@ -24,9 +25,10 @@ import { OrphanSweepService } from './orphan-sweep.service';
 export class MaintenanceProcessor implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(MaintenanceProcessor.name);
   private worker?: Worker<MaintenanceJobData>;
+  private workerConnection?: Redis;
 
   constructor(
-    @Inject(REDIS_CONNECTION) private readonly connection: Redis,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(MAINTENANCE_QUEUE) private readonly maintenanceQueue: Queue<MaintenanceJobData>,
     private readonly prisma: PrismaService,
     private readonly orphanSweep: OrphanSweepService,
@@ -35,10 +37,11 @@ export class MaintenanceProcessor implements OnModuleInit, OnApplicationShutdown
   ) {}
 
   onModuleInit(): void {
+    this.workerConnection = createWorkerConnection(this.config);
     this.worker = new Worker<MaintenanceJobData>(
       QUEUE_MAINTENANCE,
       async (job) => this.run(job),
-      { connection: this.connection, concurrency: 1 },
+      { connection: this.workerConnection, concurrency: 1 },
     );
     this.worker.on('failed', (job, err) =>
       this.logger.error(`Maintenance job ${job?.id} failed: ${err.message}`),
@@ -47,6 +50,7 @@ export class MaintenanceProcessor implements OnModuleInit, OnApplicationShutdown
 
   async onApplicationShutdown(): Promise<void> {
     await this.worker?.close();
+    await this.workerConnection?.quit().catch(() => undefined);
   }
 
   async run(job: Job<MaintenanceJobData>): Promise<void> {

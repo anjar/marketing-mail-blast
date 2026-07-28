@@ -2,7 +2,11 @@
 // All aggregates are reproducible from CampaignRecipient rows (Constitution V).
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // node:22-alpine ships musl + OpenSSL 3.x. Without this target Prisma builds
+  // only the build-host engine and the query/schema engine fails to load at
+  // runtime, surfacing as "Could not parse schema engine response".
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
