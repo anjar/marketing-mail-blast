@@ -14,6 +14,9 @@
 
 - Q: How is an in-flight send attempt (started but not yet acknowledged) represented durably, so recovery can distinguish it from a never-attempted recipient? → A: Add a durable non-terminal `IN_PROGRESS` state, persisted before the send call and carrying an attempt start time; both `IN_PROGRESS` and `PENDING` roll up into the "pending" progress count.
 - Q: When does a failed send attempt retry vs. become terminal `FAILED`? → A: Transient errors retry up to a configurable maximum; on exhaustion the recipient becomes terminal `FAILED`. Non-retryable errors become terminal `FAILED` immediately. A recipient between retries returns to a non-terminal (pending) state.
+- Q: How does recovery decide an `IN_PROGRESS` recipient is orphaned (interrupted) vs. still being actively worked by a live worker? → A: A worker holds a renewable lease/heartbeat on the `IN_PROGRESS` record; only records with an expired lease (configurable staleness timeout) are treated as orphaned and reconciled to `DELIVERY_UNKNOWN`. A record with a live lease is left alone.
+- Q: Once a recipient is `DELIVERY_UNKNOWN`, can any process move it out of that state in this phase? → A: No. `DELIVERY_UNKNOWN` is strictly terminal and absorbing; no automatic or manual transition out of it in this phase, by any process.
+- Q: Can a campaign reach a terminal status while any recipient is still `IN_PROGRESS`? → A: No. Completion requires zero `PENDING` and zero `IN_PROGRESS` (both count as pending); no terminal campaign status while any send attempt is in flight.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -243,7 +246,9 @@ valid campaign is accepted, and confirm the prior campaign's final progress is s
   before delivery, or accepted and reaching exactly one terminal outcome.
 - **FR-021**: Permitted terminal delivery outcomes are `SENT` (dry-run target positively confirmed
   acceptance), `FAILED` (delivery definitively failed with a recorded reason), and
-  `DELIVERY_UNKNOWN` (acceptance cannot be determined).
+  `DELIVERY_UNKNOWN` (acceptance cannot be determined). All three are strictly terminal and
+  absorbing: once recorded, no automatic or manual process transitions a recipient out of a terminal
+  outcome in this phase.
 - **FR-022**: A recipient still waiting, queued, processing, or awaiting retry MUST remain
   non-terminal and be counted as pending. Non-terminal recipients occupy exactly one of two durable
   states: `PENDING` (accepted, no send attempt yet started) or `IN_PROGRESS` (a send attempt has
@@ -252,11 +257,16 @@ valid campaign is accepted, and confirm the prior campaign's final progress is s
 - **FR-022a**: Before invoking the dry-run send for an accepted recipient, the system MUST durably
   transition that recipient from `PENDING` to `IN_PROGRESS` and record an attempt start time. The
   send MUST NOT be invoked while the recipient is still recorded as `PENDING`.
-- **FR-022b**: On restart, a recipient found in `IN_PROGRESS` is the interrupted-during-send case:
-  the system MUST reconcile it and, when dry-run acceptance cannot be positively confirmed, resolve
-  it to `DELIVERY_UNKNOWN` (per FR-023). It MUST NOT be silently marked `SENT` or `FAILED` and MUST
-  NOT be automatically re-sent. A recipient found in `PENDING` on restart has no started attempt and
-  MAY be attempted fresh.
+- **FR-022b**: A worker MUST claim an `IN_PROGRESS` recipient with a renewable ownership lease
+  (heartbeat) that it renews while the attempt is live. Recovery MUST treat as orphaned only those
+  `IN_PROGRESS` records whose lease has expired past a configurable staleness timeout; an
+  `IN_PROGRESS` record with a live lease MUST be left untouched (preventing a second concurrent
+  attempt, per FR-038).
+- **FR-022c**: An orphaned `IN_PROGRESS` recipient is the interrupted-during-send case: the system
+  MUST reconcile it and, when dry-run acceptance cannot be positively confirmed, resolve it to
+  `DELIVERY_UNKNOWN` (per FR-023). It MUST NOT be silently marked `SENT` or `FAILED` and MUST NOT be
+  automatically re-sent. A recipient found in `PENDING` on restart has no started attempt and MAY be
+  attempted fresh.
 - **FR-023**: The system MUST NOT report `SENT` without evidence of dry-run acceptance, MUST NOT
   report `FAILED` when delivery may have been accepted, and MUST NEVER silently convert an uncertain
   delivery into `SENT` or `FAILED`.
@@ -287,7 +297,9 @@ valid campaign is accepted, and confirm the prior campaign's final progress is s
 
 **Completion**
 
-- **FR-030**: A campaign remains active while at least one snapshot recipient is pending.
+- **FR-030**: A campaign remains active while at least one snapshot recipient is non-terminal, i.e.
+  in `PENDING` or `IN_PROGRESS`. A campaign MUST NOT reach a terminal status while any recipient is
+  still `IN_PROGRESS`.
 - **FR-031**: A campaign reaches `COMPLETED` when no recipients remain pending, all accepted
   recipients are terminal, and none ended `FAILED` or `DELIVERY_UNKNOWN`.
 - **FR-032**: A campaign reaches `COMPLETED_WITH_ISSUES` when no recipients remain pending and at

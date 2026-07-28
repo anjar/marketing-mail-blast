@@ -1,0 +1,142 @@
+openapi: 3.1.0
+info:
+  title: Bulk Email Dry-Run Sender API
+  version: 1.0.0
+  description: >
+    Single-active-campaign dry-run bulk email API. Progress derives from PostgreSQL only.
+servers:
+  - url: /
+paths:
+  /api/campaigns:
+    post:
+      summary: Submit one campaign (single active enforced by DB)
+      operationId: createCampaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCampaignRequest' }
+      responses:
+        '201':
+          description: Campaign accepted; snapshot fixed, preparation begins
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignSummary' }
+        '400':
+          description: Subject or body empty after trimming (FR-002)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Another campaign is active (FR-006/009); deterministic conflict
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/campaigns/active:
+    get:
+      summary: Current active campaign (or none)
+      operationId: getActiveCampaign
+      responses:
+        '200':
+          description: Active campaign summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignSummary' }
+        '204':
+          description: No active campaign; form is available
+  /api/campaigns/{id}/progress:
+    get:
+      summary: Persisted campaign progress (PostgreSQL-derived)
+      operationId: getCampaignProgress
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Latest persisted progress
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignProgress' }
+        '404':
+          description: Unknown campaign id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /health:
+    get:
+      summary: Liveness
+      operationId: health
+      responses:
+        '200': { description: Process alive }
+  /ready:
+    get:
+      summary: Readiness (PostgreSQL + Redis reachable)
+      operationId: ready
+      responses:
+        '200': { description: Ready }
+        '503':
+          description: A dependency is not ready
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+components:
+  schemas:
+    CreateCampaignRequest:
+      type: object
+      required: [subject, body]
+      properties:
+        subject:
+          type: string
+          description: Must contain >=1 non-whitespace char; not personalized (FR-002/014)
+        body:
+          type: string
+          description: Plain text; may contain the exact placeholder {{name}}
+    CampaignSummary:
+      type: object
+      required: [id, status, startedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [PREPARING, RUNNING, COMPLETED, COMPLETED_WITH_ISSUES, FAILED]
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+    CampaignProgress:
+      type: object
+      required:
+        [id, status, total, pending, rejected, sent, failed, deliveryUnknown,
+         totalDeliveryAttempts, rejectedByReason, failedByReason, startedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [PREPARING, RUNNING, COMPLETED, COMPLETED_WITH_ISSUES, FAILED]
+        total: { type: integer, description: snapshot recipient count }
+        pending: { type: integer, description: PENDING + IN_PROGRESS rollup (FR-022) }
+        rejected: { type: integer }
+        sent: { type: integer }
+        failed: { type: integer }
+        deliveryUnknown: { type: integer }
+        totalDeliveryAttempts: { type: integer }
+        rejectedByReason:
+          type: object
+          description: count grouped by RejectionReason (FR-028)
+          additionalProperties: { type: integer }
+          example: { EMAIL_MISSING: 3, EMAIL_INVALID_FORMAT: 5, DUPLICATE_EMAIL: 12 }
+        failedByReason:
+          type: object
+          description: count grouped by DeliveryFailureReason (FR-028)
+          additionalProperties: { type: integer }
+          example: { SMTP_REJECTED: 2, RETRIES_EXHAUSTED: 1 }
+        startedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+      description: >
+        Invariant: total = pending + rejected + sent + failed + deliveryUnknown (FR-029/SC-004).
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: { type: string, description: stable machine code, e.g. CAMPAIGN_ACTIVE }
+        message: { type: string }
